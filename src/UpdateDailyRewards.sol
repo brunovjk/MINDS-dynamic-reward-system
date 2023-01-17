@@ -45,14 +45,14 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
          */
         rewardsTable.push(RewardsCoordinates(-10 * 10**18, 0.02 * 10**18));
         rewardsTable.push(
-            RewardsCoordinates(-9.63 * 10**18, 0.02574545455 * 10**18)
+            RewardsCoordinates(-9.63 * 10**18, 0.0257454545454546 * 10**18)
         );
-        rewardsTable.push(RewardsCoordinates(0, 0.06214545455 * 10**18));
+        rewardsTable.push(RewardsCoordinates(0, 0.0621454545454546 * 10**18));
         rewardsTable.push(
-            RewardsCoordinates(0.556 * 10**18, 0.06354545455 * 10**18)
+            RewardsCoordinates(0.556 * 10**18, 0.0635454545454546 * 10**18)
         );
         rewardsTable.push(
-            RewardsCoordinates(14.44 * 10**18, 0.09854545455 * 10**18)
+            RewardsCoordinates(14.44 * 10**18, 0.0985454545454545 * 10**18)
         );
         rewardsTable.push(RewardsCoordinates(15.00 * 10**18, 0.1 * 10**18));
     }
@@ -92,24 +92,21 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
         int256 maxY
     ) internal pure returns (int256 _y) {
         /**
-         * Analyzing the values, we see that all intervals are linear equations:
          * https://docs.google.com/document/d/1OWWFLzC-qi5yQWTbGCaTOckSxIvRNPev_BiiZfQYJ_Q/edit?usp=sharing
+         * Analyzing the values, we see that all intervals belong to linear functions.
          * So we can do this:
-         * https://medium.com/not-zero/linear-equation-50a847f58665
-         * minY = (a * minX) + b
-         * maxY = (a * maxX) + b
+         * Two Point Form
+         * https://www.cuemath.com/geometry/two-point-form/
          */
-        int256 a = (minY - maxY) / (minX - maxX);
-        int256 b = ((minY * maxX) - (minX * maxY)) / (maxX - minX);
-        _y = (a * x) + b;
+        _y = (((maxY - minY) / (maxX - minX)) * (x - maxX)) + maxY;
     }
 
     /**
      * Calculate the current percentage change.
      */
     function calculateCurrentPercentageChange(
-        int256 _priceChangePercentage,
-        int256 _lastPercentageChange
+        int256 _lastPercentageChange,
+        int256 _priceChangePercentage
     ) internal pure returns (int256 _currentPercentageChange) {
         _currentPercentageChange =
             _lastPercentageChange +
@@ -121,43 +118,40 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
      * Return daily rewards in 'per the second' format: value in Wei / 86400
      */
     function calculateRewardsPerSecond(int256 _currentPercentageChange)
-        internal
+        public
         view
         returns (int256 _rewardsPerSecond)
     {
         // if ( % <= -10.00 ) { r = 0.02}
         if (_currentPercentageChange <= rewardsTable[0].percentageChange)
-            return _rewardsPerSecond = rewardsTable[0].reward / 86400;
+            return _rewardsPerSecond = rewardsTable[0].reward;
         // if ( % > 15.00 ) { r = 0.1}
         if (
             _currentPercentageChange >
             rewardsTable[rewardsTable.length - 1].percentageChange
         )
             return
-                _rewardsPerSecond =
-                    rewardsTable[rewardsTable.length - 1].reward /
-                    86400;
+                _rewardsPerSecond = rewardsTable[rewardsTable.length - 1]
+                    .reward;
 
-        for (uint256 i = 0; i < rewardsTable.length - 2; i++) {
+        for (uint256 i = 0; i < rewardsTable.length - 1; i++) {
             // i = 0; if ( -10.00 < % <= -9.63 ) { 0.02 < r <= 0.02574545455 }
             // i = 1; if ( -9.63 < % <= 0.00 ) { 0.02574545455 < r <= 0.06214545455 }
             // i = 2; if ( 0.00 < % <= 0.556 ) { 0.06214545455 < r <= 0.06354545455 }
             // i = 3; if ( 0.556 < % <= 14.44 ) { 0.06354545455 < r <= 0.09854545455 }
             // i = 4; if ( 14.44 < % <= 15.00 ) { 0.09854545455 < r <= 0.1 }
             if (
-                rewardsTable[i].percentageChange > _currentPercentageChange &&
+                _currentPercentageChange > rewardsTable[i].percentageChange &&
                 _currentPercentageChange <= rewardsTable[i + 1].percentageChange
             )
                 return
-                    _rewardsPerSecond =
-                        calculateCoordinateY(
-                            _currentPercentageChange, // x
-                            rewardsTable[i].percentageChange, // minX,
-                            rewardsTable[i + 1].percentageChange, // maxX,
-                            rewardsTable[i].reward, // minY,
-                            rewardsTable[i + 1].reward // maxY
-                        ) /
-                        86400;
+                    _rewardsPerSecond = calculateCoordinateY(
+                        _currentPercentageChange, // x
+                        rewardsTable[i].percentageChange, // minX,
+                        rewardsTable[i + 1].percentageChange, // maxX,
+                        rewardsTable[i].reward, // minY,
+                        rewardsTable[i + 1].reward // maxY
+                    );
         }
     }
 
