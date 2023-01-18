@@ -28,7 +28,9 @@ interface IBrainManagementContract {
 
 contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
     using Chainlink for Chainlink.Request;
-
+    /**
+     * Variable to track the last percentage change
+     */
     int256 public lastPercentageChange;
     /**
      * Variable type used to calculate reward per percentage
@@ -50,14 +52,14 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
     /**
      * Chainlink Automation
      */
-    uint256 immutable interval; // Interval to perform Update Reward
-    uint256 lastUpdatedTimeStamp; // Last time that rewards were updted
-    uint256 lastUpKeepId; // Last upkeep registred. Fund this upkeep to automation keep runing.
-    uint32 gasLimit; // Gas limit to perform upKeep
-    uint96 automateLinkAmount; // Initial amount of Link token to send to the upkeep
+    uint256 private immutable interval; // Interval to perform Update Reward
+    uint256 private lastUpdatedTimeStamp; // Last time that rewards were updted
+    uint256 private lastUpKeepId; // Last upkeep registred. Fund this upkeep to automation keep runing.
+    uint32 private gasLimit; // Gas limit to perform upKeep
+    uint96 private automateLinkAmount; // Initial amount of Link token to send to the upkeep
     address private immutable registrar; // Chainlink registrar address
     AutomationRegistryInterface private immutable registry; // Chainlink registry address
-    bytes4 registerSig = KeeperRegistrarInterface.register.selector;
+    bytes4 private registerSig = KeeperRegistrarInterface.register.selector;
     LinkTokenInterface private immutable link; // Chainlink Token address
 
     /**
