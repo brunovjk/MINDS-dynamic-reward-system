@@ -1,4 +1,6 @@
 ﻿# MINDS-dynamic-reward-system
+
+testCalculateRewardsPerSecond:
 forge test --match-contract CalcRewardsPerSecondTest -vvvv
 
 Task: To create an automated dynamic reward system using Chainlink automation.
