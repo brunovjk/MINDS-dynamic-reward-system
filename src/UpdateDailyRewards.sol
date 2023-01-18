@@ -4,6 +4,24 @@ pragma solidity ^0.8.13;
 import "@chainlink/contracts/src/v0.8/ChainlinkClient.sol";
 import "@chainlink/contracts/src/v0.8/ConfirmedOwner.sol";
 
+// Chainlink Automation compatible imports
+import {AutomationRegistryInterface, State, Config} from "@chainlink/contracts/src/v0.8/interfaces/AutomationRegistryInterface1_2.sol";
+import {LinkTokenInterface} from "@chainlink/contracts/src/v0.8/interfaces/LinkTokenInterface.sol";
+
+interface KeeperRegistrarInterface {
+    function register(
+        string memory name,
+        bytes calldata encryptedEmail,
+        address upkeepContract,
+        uint32 gasLimit,
+        address adminAddress,
+        bytes calldata checkData,
+        uint96 amount,
+        uint8 source,
+        address sender
+    ) external;
+}
+
 interface IBrainManagementContract {
     function setRewardsPerSecond(uint256 value) external;
 }
@@ -12,26 +30,54 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
     using Chainlink for Chainlink.Request;
 
     int256 public lastPercentageChange;
-
+    /**
+     * Variable type used to calculate reward per percentage
+     */
     struct RewardsCoordinates {
         int256 percentageChange;
         int256 reward;
     }
+    /**
+     * Current system table coordinates (spreadsheet table)
+     */
     RewardsCoordinates[] private rewardsTable;
-
+    /**
+     * Chainlink Any API
+     */
     bytes32 private jobId;
     uint256 private fee;
+    bool private wasResquested;
+    /**
+     * Chainlink Automation
+     */
+    uint256 immutable interval; // Interval to perform Update Reward
+    uint256 lastUpdatedTimeStamp; // Last time that rewards were updted
+    uint256 lastUpKeepId; // Last upkeep registred. Fund this upkeep to automation keep runing.
+    uint32 gasLimit; // Gas limit to perform upKeep
+    uint96 automateLinkAmount; // Initial amount of Link token to send to the upkeep
+    address private immutable registrar; // Chainlink registrar address
+    AutomationRegistryInterface private immutable registry; // Chainlink registry address
+    bytes4 registerSig = KeeperRegistrarInterface.register.selector;
+    LinkTokenInterface private immutable link; // Chainlink Token address
 
+    /**
+     * Contract interface we will send new calculated rewardsPerSecond
+     */
     IBrainManagementContract private immutable brainManagementContract;
 
     constructor(address brainManagementContractAddress)
         ConfirmedOwner(msg.sender)
     {
+        /**
+         * THIS IS AN PROTOTYPE CONTRACT THAT USES HARDCODED VALUES FOR TESTING.
+         * DO NOT USE THIS CODE IN PRODUCTION.
+         */
         // setChainlinkToken(0x84b9B910527Ad5C03A9Ca831909E21e236EA7b06); // BNB Chain testnet
         // setChainlinkOracle(0xCC79157eb46F5624204f47AB42b3906cAA40eaB7); // BNB Chain testnet
 
         setChainlinkToken(0x326C977E6efc84E512bB9C30f76E30c160eD06FB); // Mumbai
         setChainlinkOracle(0x40193c8518BB267228Fc409a613bDbD8eC5a97b3); // mumbai
+
         jobId = "fcf4140d696d44b687012232948bdd5d"; // GET>int256: https://docs.chain.link/any-api/testnet-oracles
         fee = (1 * LINK_DIVISIBILITY) / 10; // 0,1 * 10**18 (Varies by network and job)
 
@@ -55,30 +101,20 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
             RewardsCoordinates(14.44 * 10**18, 0.0985454545454545 * 10**18)
         );
         rewardsTable.push(RewardsCoordinates(15.00 * 10**18, 0.1 * 10**18));
-    }
 
-    /**
-     * Create a Chainlink request to retrieve API response, find the target
-     * data, then multiply by 10 ** 18 (to remove decimal places from data).
-     */
-    function requestPriceChangePercentage() public returns (bytes32 requestId) {
-        Chainlink.Request memory req = buildChainlinkRequest(
-            jobId,
-            address(this),
-            this.fulfill.selector
-        );
+        interval = 24 * 60 * 60; // 24 horas em segundos
+        lastUpdatedTimeStamp = block.timestamp;
+        automateLinkAmount = 5 * 10**18;
 
-        // Set the URL to perform the GET request on
-        req.add("get", "https://api.coingecko.com/api/v3/coins/biggerminds");
-        // Chainlink nodes 1.0.0 and later support this format
-        req.add("path", "market_data,price_change_percentage_24h");
+        link = LinkTokenInterface(0x40193c8518BB267228Fc409a613bDbD8eC5a97b3); // Mumbai
+        registrar = 0x40193c8518BB267228Fc409a613bDbD8eC5a97b3; // Mumbai
+        registry = AutomationRegistryInterface(
+            0x40193c8518BB267228Fc409a613bDbD8eC5a97b3
+        ); // Mumbai
 
-        // Multiply the result by 10 ** 18 to remove decimals
-        int256 timesAmount = 10**18;
-        req.addInt("times", timesAmount);
-
-        // Sends the request
-        return sendChainlinkRequest(req, fee);
+        // link = LinkTokenInterface(); // BNB Chain testnet
+        // registrar = address; // BNB Chain testnet
+        // registry = AutomationRegistryInterface(); // MumbaiBNB Chain testnet
     }
 
     /**
@@ -165,8 +201,12 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
     /**
      * Update percentageChange to be used in the next 24h.
      */
-    function updatePriceChangePercentage(int256 _percentageChange) internal {
+    function updatePriceChangePercentage(
+        int256 _percentageChange,
+        uint256 _timestamp
+    ) internal {
         lastPercentageChange = _percentageChange;
+        lastUpdatedTimeStamp = _timestamp;
     }
 
     /**
@@ -190,7 +230,133 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
         // Send Rewards to Brain Management Contract
         sendRewardsPerSecond(_rewardsPerSecond);
         // Update percentage change to be used in the next 24h
-        updatePriceChangePercentage(_currentPercentageChange);
+        updatePriceChangePercentage(_currentPercentageChange, block.timestamp);
+        wasResquested = false;
+    }
+
+    /**
+     * Create a Chainlink request to retrieve API response, find the target
+     * data, then multiply by 10 ** 18 (to remove decimal places from data).
+     */
+    function requestUpdateDailyRewards() public returns (bytes32 requestId) {
+        Chainlink.Request memory req = buildChainlinkRequest(
+            jobId,
+            address(this),
+            this.fulfill.selector
+        );
+
+        // Set the URL to perform the GET request on
+        req.add("get", "https://api.coingecko.com/api/v3/coins/biggerminds");
+        // Chainlink nodes 1.0.0 and later support this format
+        req.add("path", "market_data,price_change_percentage_24h");
+
+        // Multiply the result by 10 ** 18 to remove decimals
+        int256 timesAmount = 10**18;
+        req.addInt("times", timesAmount);
+
+        wasResquested = true;
+        // Sends the request
+        return sendChainlinkRequest(req, fee);
+    }
+
+    /**
+     * Chainlink automation allow the protocol to run on autopilot without
+     * human intervention to adjust daily rewards.
+     * We call this function once, and after just garantee that the last
+     * upkeep is funded.
+     */
+    function initiateAutomaticRewardSystem() public {
+        (State memory state, Config memory _c, address[] memory _k) = registry
+            .getState();
+        uint256 oldNonce = state.nonce;
+        bytes memory checkData;
+        bytes memory payload = abi.encode(
+            "Automatic Reward System",
+            "0x",
+            address(this),
+            gasLimit,
+            address(msg.sender),
+            checkData,
+            automateLinkAmount,
+            0,
+            address(this)
+        );
+
+        link.transferAndCall(
+            registrar,
+            automateLinkAmount,
+            bytes.concat(registerSig, payload)
+        );
+        (state, _c, _k) = registry.getState();
+        uint256 newNonce = state.nonce;
+        if (newNonce == oldNonce + 1) {
+            uint256 upkeepID = uint256(
+                keccak256(
+                    abi.encodePacked(
+                        blockhash(block.number - 1),
+                        address(registry),
+                        uint32(oldNonce)
+                    )
+                )
+            );
+            lastUpKeepId = upkeepID;
+        } else {
+            revert("auto-approve disabled");
+        }
+    }
+
+    /**
+     * checkUpkeep function contains the logic that will be executed off-chain
+     * to see if performUpkeep should be executed
+     * After you register the contract as an upkeep, the Chainlink Automation
+     * Network simulates our checkUpkeep off-chain during every block to determine
+     * if the updateInterval time has passed since the last increment (timestamp).
+     * This cycle repeats until the upkeep is cancelled or runs out of funding.
+     */
+    function checkUpkeep(
+        bytes calldata /* checkData */
+    )
+        external
+        view
+        returns (
+            bool upkeepNeeded,
+            bytes memory /* performData */
+        )
+    {
+        upkeepNeeded =
+            (block.timestamp - lastUpdatedTimeStamp) > interval &&
+            !wasResquested;
+        // We don't use the checkData in this case.
+        // The checkData is defined when the Upkeep was registered.
+    }
+
+    /**
+     * performUpkeep function will be executed on-chain when checkUpkeep returns true
+     */
+    function performUpkeep(
+        bytes calldata /* performData */
+    ) external {
+        //We highly recommend revalidating the upkeep in the performUpkeep function
+        if (
+            (block.timestamp - lastUpdatedTimeStamp) > interval &&
+            !wasResquested
+        ) {
+            requestUpdateDailyRewards();
+        }
+        // We don't use the performData in this case.
+        // The performData is generated by the Automation Node's call to your checkUpkeep function
+    }
+
+    /**
+     * Allow check contract's Link token balance
+     */
+    function contractLinkBalance()
+        public
+        view
+        onlyOwner
+        returns (uint256 balance)
+    {
+        balance = link.balanceOf(address(this));
     }
 
     /**
