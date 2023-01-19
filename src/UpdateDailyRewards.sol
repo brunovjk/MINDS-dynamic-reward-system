@@ -104,7 +104,7 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
         );
         rewardsTable.push(RewardsCoordinates(15.00 * 10**18, 0.1 * 10**18));
 
-        interval = 24 * 60 * 60; // 24 horas in seconds
+        interval = 24 * 60 * 60; // 24 hours in seconds
         lastUpdatedTimeStamp = block.timestamp;
         automateLinkAmount = 5 * 10**18;
 
