@@ -1,8 +1,5 @@
 ﻿# MINDS-dynamic-reward-system
 
-testCalculateRewardsPerSecond:
-forge test --match-contract CalcRewardsPerSecondTest -vvvv
-
 Task: To create an automated dynamic reward system using Chainlink automation.
 
 Overview: The automated dynamic reward system will track MIND+ performance and adjust the rewards based on the percent change using Chainlink automation.
@@ -316,3 +313,51 @@ For example, 0.06214545455 eth => 62145454550000000 Wei / 86400 = 719276094329 �
 
 4. Call the brain-management-contract
    Let's say the rewards calculated are 0.06214545455, that number the brain-management smart contract does not like it. The smart contract only accepts values in per-second format.
+
+## 🚀 Installing MINDS-dynamic-reward-system
+
+Foundry is the framework of choice. If you dont know what foundry is nor have it intalled, pleas head to https://book.getfoundry.sh/ and follow the instructions.
+
+To install MINDS-dynamic-reward-system, follow these steps:
+
+```
+forge install
+```
+
+## ☕ Using MINDS-dynamic-reward-system
+
+We are writing tests, for now we only have tests of the function to calculate rewards per second
+
+```
+forge test --match-contract CalcRewardsPerSecondTest -vvvv
+```
+
+### Tasks
+
+The project is still under development and the next updates will focus on the following tasks:
+
+- [x] Create a test to verify the function calculateRewardsPerSecond
+
+- [ ] Create a test to verify the function sendRewardsPerSecond
+
+- [ ] Create a test to verify the function updatePriceChangePercentage
+
+- [ ] Create script to test the automation cycle
+
+- [ ] Create script to deploy on testnet
+
+
+## 📫 Contributing to MINDS-dynamic-reward-system
+
+1. Fork this repository.
+
+2. Create a branch: `git checkout -b <branch_name>`.
+
+3. Make your changes and commit them: `git commit -m '<commit_message>'`
+
+4. Push to original branch: `git push origin MINDS-dynamic-reward-system / <local>`
+
+5. Create the pull request.
+
+​
+Alternatively, see the GitHub documentation at [how to create a pull request](https://help.github.com/en/github/collaborating-with-issues-and-pull-requests/creating-a-pull-request ).

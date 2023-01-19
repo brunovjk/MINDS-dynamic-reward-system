@@ -63,7 +63,7 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
     LinkTokenInterface private immutable link; // Chainlink Token address
 
     /**
-     * Contract interface we will send new calculated rewardsPerSecond
+     * Contract interface that we will send new calculated rewardsPerSecond
      */
     IBrainManagementContract private immutable brainManagementContract;
 
@@ -114,7 +114,6 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
             0x40193c8518BB267228Fc409a613bDbD8eC5a97b3
         ); // Mumbai
 
-        // link = LinkTokenInterface(); // BNB Chain testnet
         // registrar = address; // BNB Chain testnet
         // registry = AutomationRegistryInterface(); // MumbaiBNB Chain testnet
     }
@@ -130,9 +129,9 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
         int256 maxY
     ) internal pure returns (int256 _y) {
         /**
-         * https://docs.google.com/document/d/1OWWFLzC-qi5yQWTbGCaTOckSxIvRNPev_BiiZfQYJ_Q/edit?usp=sharing
-         * Analyzing the values, we see that all intervals belong to linear functions.
-         * So we can do this:
+         * Analyzing the table values ​​found in the README file,
+         * all intervals belong to linear equations.
+         * We were able to find any 'reward' value within the given range.
          * Two Point Form
          * https://www.cuemath.com/geometry/two-point-form/
          */
@@ -160,19 +159,25 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
         view
         returns (int256 _rewardsPerSecond)
     {
+        // The rewards cannot be lower than 0.02 MIND+ per day
         // if ( % <= -10.00 ) { r = 0.02}
         if (_currentPercentageChange <= rewardsTable[0].percentageChange)
-            return _rewardsPerSecond = rewardsTable[0].reward;
+            return _rewardsPerSecond = rewardsTable[0].reward / 86400;
+        // And cannot be higher than 0.1 MIND+ per day
         // if ( % > 15.00 ) { r = 0.1}
         if (
             _currentPercentageChange >
             rewardsTable[rewardsTable.length - 1].percentageChange
         )
             return
-                _rewardsPerSecond = rewardsTable[rewardsTable.length - 1]
-                    .reward;
+                _rewardsPerSecond =
+                    rewardsTable[rewardsTable.length - 1].reward /
+                    86400;
 
         for (uint256 i = 0; i < rewardsTable.length - 1; i++) {
+            // Must be used with provided rewards structure
+            // All intervals are linear.
+            // It goes from negative 10% to positive 15%
             // i = 0; if ( -10.00 < % <= -9.63 ) { 0.02 < r <= 0.02574545455 }
             // i = 1; if ( -9.63 < % <= 0.00 ) { 0.02574545455 < r <= 0.06214545455 }
             // i = 2; if ( 0.00 < % <= 0.556 ) { 0.06214545455 < r <= 0.06354545455 }
@@ -183,13 +188,15 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
                 _currentPercentageChange <= rewardsTable[i + 1].percentageChange
             )
                 return
-                    _rewardsPerSecond = calculateCoordinateY(
-                        _currentPercentageChange, // x
-                        rewardsTable[i].percentageChange, // minX,
-                        rewardsTable[i + 1].percentageChange, // maxX,
-                        rewardsTable[i].reward, // minY,
-                        rewardsTable[i + 1].reward // maxY
-                    );
+                    _rewardsPerSecond =
+                        calculateCoordinateY(
+                            _currentPercentageChange, // x
+                            rewardsTable[i].percentageChange, // minX,
+                            rewardsTable[i + 1].percentageChange, // maxX,
+                            rewardsTable[i].reward, // minY,
+                            rewardsTable[i + 1].reward // maxY
+                        ) /
+                        86400;
         }
     }
 
@@ -265,7 +272,7 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
      * Chainlink automation allow the protocol to run on autopilot without
      * human intervention to adjust daily rewards.
      * We call this function once, and after just garantee that the last
-     * upkeep is funded.
+     * upkeep is alaways funded.
      */
     function initiateAutomaticRewardSystem() public {
         (State memory state, Config memory _c, address[] memory _k) = registry
@@ -350,7 +357,7 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
     }
 
     /**
-     * Allow check contract's Link token balance
+     * Check contract's Link token balance
      */
     function contractLinkBalance()
         public
@@ -365,7 +372,6 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
      * Allow withdraw of Link tokens from the contract
      */
     function withdrawLink() public onlyOwner {
-        LinkTokenInterface link = LinkTokenInterface(chainlinkTokenAddress());
         require(
             link.transfer(msg.sender, link.balanceOf(address(this))),
             "Unable to transfer"
