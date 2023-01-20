@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.7;
 
 import "@chainlink/contracts/src/v0.8/ChainlinkClient.sol";
 import "@chainlink/contracts/src/v0.8/ConfirmedOwner.sol";
@@ -29,47 +29,71 @@ interface IBrainManagementContract {
 contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
     using Chainlink for Chainlink.Request;
     /**
-     * Variable to track the last percentage change
+     * Chainlink Any API
      */
     int256 public lastPercentageChange;
+    bool internal requestedButNotUpdated;
+    bool internal updatedButNotSended;
+    bytes32 internal jobId;
+    uint256 internal fee;
+
     /**
      * Variable type used to calculate reward per percentage
      */
-    struct RewardsCoordinates {
+    struct RewardsTable {
         int256 percentageChange;
-        int256 reward;
+        uint256 reward;
     }
+
     /**
      * Current system table coordinates (spreadsheet table)
      */
-    RewardsCoordinates[] private rewardsTable;
-    /**
-     * Chainlink Any API
-     */
-    bytes32 private jobId;
-    uint256 private fee;
-    bool private wasResquested;
+    RewardsTable[] internal rewardsTable;
+
     /**
      * Chainlink Automation
      */
-    uint256 private immutable interval; // Interval to perform Update Reward
-    uint256 private lastUpdatedTimeStamp; // Last time that rewards were updted
-    uint256 private lastUpKeepId; // Last upkeep registred. Fund this upkeep to automation keep runing.
-    uint32 private gasLimit; // Gas limit to perform upKeep
-    uint96 private automateLinkAmount; // Initial amount of Link token to send to the upkeep
-    address private immutable registrar; // Chainlink registrar address
-    AutomationRegistryInterface private immutable registry; // Chainlink registry address
-    bytes4 private registerSig = KeeperRegistrarInterface.register.selector;
-    LinkTokenInterface private immutable link; // Chainlink Token address
+    /**
+     * Make sure they are always funded
+     * Check balance and add fund using
+     * Registry Address	0x02777053d6764996e594c3E88AF1D58D5363a2e6
+     * https://docs.chain.link/chainlink-automation/supported-networks/#configurations
+     * Registry.getUpkeep(uint256 upkeepID) returns (target address, executeGas uint32, checkData bytes, balance uint96, lastKeeper address, admin address, maxValidBlocknumber uint64, amountSpent uint96)
+     * Registry.addFunds(uint256 upkeepID , uint96 amount)
+     * Registry.cancelUpkeep(uint256 upkeepID , uint96 amount)
+     */
+    uint256 internal immutable updateInterval; // Interval to perform Update Reward
+    uint256 internal lastUpdateTimeStamp;
+    uint256 internal updateUpkeepID; // Upkeep responsible for updating "priceChangePercentage"
+    uint256 internal sendUpkeepID; // Upkeep responsible for sending "rewardsPerSeconds"
+    bool internal automationRunning; // Monitor whether the machine is turned on
+    // Event emitted when machine is turned on
+    event AutomationRunning(
+        uint256 indexed updateUpkeepID,
+        uint256 indexed sendUpkeepID
+    );
+    // Event emitted when machine is turned off
+    event TurnOffAutomation(
+        uint256 indexed updateUpkeepID,
+        uint256 indexed sendUpkeepID
+    );
+
+    LinkTokenInterface public immutable i_link; // Chainlink Token address
+    address public immutable registrar; // Chainlink registrar address
+    AutomationRegistryInterface public immutable i_registry; // Chainlink registry address
+    bytes4 registerSig = KeeperRegistrarInterface.register.selector;
 
     /**
      * Contract interface that we will send new calculated rewardsPerSecond
      */
     IBrainManagementContract private immutable brainManagementContract;
 
-    constructor(address brainManagementContractAddress)
-        ConfirmedOwner(msg.sender)
-    {
+    constructor(
+        LinkTokenInterface _link,
+        address _registrar,
+        AutomationRegistryInterface _registry,
+        address brainManagementContractAddress
+    ) ConfirmedOwner(msg.sender) {
         /**
          * THIS IS AN PROTOTYPE CONTRACT THAT USES HARDCODED VALUES FOR TESTING.
          * DO NOT USE THIS CODE IN PRODUCTION.
@@ -80,93 +104,55 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
         setChainlinkToken(0x326C977E6efc84E512bB9C30f76E30c160eD06FB); // Mumbai
         setChainlinkOracle(0x40193c8518BB267228Fc409a613bDbD8eC5a97b3); // mumbai
 
-        jobId = "fcf4140d696d44b687012232948bdd5d"; // GET>int256: https://docs.chain.link/any-api/testnet-oracles
-        fee = (1 * LINK_DIVISIBILITY) / 10; // 0,1 * 10**18 (Varies by network and job)
-
         brainManagementContract = IBrainManagementContract(
             brainManagementContractAddress
         ); // Dummy brain-management smart contract
 
-        /*
-         * Table to calculate rewards according to percentage of price change tracking.
-         * https://docs.google.com/document/d/1OWWFLzC-qi5yQWTbGCaTOckSxIvRNPev_BiiZfQYJ_Q/edit?usp=sharing
-         */
-        rewardsTable.push(RewardsCoordinates(-10 * 10**18, 0.02 * 10**18));
-        rewardsTable.push(
-            RewardsCoordinates(-9.63 * 10**18, 0.0257454545454546 * 10**18)
-        );
-        rewardsTable.push(RewardsCoordinates(0, 0.0621454545454546 * 10**18));
-        rewardsTable.push(
-            RewardsCoordinates(0.556 * 10**18, 0.0635454545454546 * 10**18)
-        );
-        rewardsTable.push(
-            RewardsCoordinates(14.44 * 10**18, 0.0985454545454545 * 10**18)
-        );
-        rewardsTable.push(RewardsCoordinates(15.00 * 10**18, 0.1 * 10**18));
+        jobId = "fcf4140d696d44b687012232948bdd5d"; // GET>int256: https://docs.chain.link/any-api/testnet-oracles
+        fee = (1 * LINK_DIVISIBILITY) / 10; // 0,1 * 10**18 (Varies by network and job)
 
-        interval = 24 * 60 * 60; // 24 hours in seconds
-        lastUpdatedTimeStamp = block.timestamp;
-        automateLinkAmount = 5 * 10**18;
+        updateInterval = 24 * 60 * 60 seconds;
+        lastUpdateTimeStamp = block.timestamp;
 
-        link = LinkTokenInterface(0x40193c8518BB267228Fc409a613bDbD8eC5a97b3); // Mumbai
-        registrar = 0x40193c8518BB267228Fc409a613bDbD8eC5a97b3; // Mumbai
-        registry = AutomationRegistryInterface(
-            0x40193c8518BB267228Fc409a613bDbD8eC5a97b3
-        ); // Mumbai
-
-        // registrar = address; // BNB Chain testnet
-        // registry = AutomationRegistryInterface(); // MumbaiBNB Chain testnet
+        i_link = _link;
+        registrar = _registrar;
+        i_registry = _registry;
     }
 
     /**
-     * Calculate rewards within a specific range.
+     * Allow withdraw of Link tokens from the contract
      */
-    function calculateCoordinateY(
-        int256 x,
-        int256 minX,
-        int256 maxX,
-        int256 minY,
-        int256 maxY
-    ) internal pure returns (int256 _y) {
-        /**
-         * Analyzing the table values ​​found in the README file,
-         * all intervals belong to linear equations.
-         * We were able to find any 'reward' value within the given range.
-         * Two Point Form
-         * https://www.cuemath.com/geometry/two-point-form/
-         */
-        _y = (((maxY - minY) / (maxX - minX)) * (x - maxX)) + maxY;
+    function withdrawLink() public {
+        require(
+            i_link.transfer(msg.sender, i_link.balanceOf(address(this))),
+            "Unable to transfer"
+        );
     }
 
     /**
-     * Calculate the current percentage change.
+     * Check contract's Link token balance
      */
-    function calculateCurrentPercentageChange(
-        int256 _lastPercentageChange,
-        int256 _priceChangePercentage
-    ) internal pure returns (int256 _currentPercentageChange) {
-        _currentPercentageChange =
-            _lastPercentageChange +
-            _priceChangePercentage;
+    function contractLinkBalance() public view returns (uint256 balance) {
+        balance = i_link.balanceOf(address(this));
     }
 
     /**
      * Calculate RewardsPerSecond according to current percentage change.
      * Return daily rewards in 'per the second' format: value in Wei / 86400
      */
-    function calculateRewardsPerSecond(int256 _currentPercentageChange)
+    function calculateCurrentRewardsPerSecond()
         public
         view
-        returns (int256 _rewardsPerSecond)
+        returns (uint256 _rewardsPerSecond)
     {
         // The rewards cannot be lower than 0.02 MIND+ per day
-        // if ( % <= -10.00 ) { r = 0.02}
-        if (_currentPercentageChange <= rewardsTable[0].percentageChange)
+        // if ( % < -9.63 ) { r = 0.02}
+        if (lastPercentageChange < rewardsTable[1].percentageChange)
             return _rewardsPerSecond = rewardsTable[0].reward / 86400;
         // And cannot be higher than 0.1 MIND+ per day
-        // if ( % > 15.00 ) { r = 0.1}
+        // if ( % >= 15.00 ) { r = 0.1}
         if (
-            _currentPercentageChange >
+            lastPercentageChange >=
             rewardsTable[rewardsTable.length - 1].percentageChange
         )
             return
@@ -174,80 +160,37 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
                     rewardsTable[rewardsTable.length - 1].reward /
                     86400;
 
-        for (uint256 i = 0; i < rewardsTable.length - 1; i++) {
-            // Must be used with provided rewards structure
-            // All intervals are linear.
-            // It goes from negative 10% to positive 15%
-            // i = 0; if ( -10.00 < % <= -9.63 ) { 0.02 < r <= 0.02574545455 }
-            // i = 1; if ( -9.63 < % <= 0.00 ) { 0.02574545455 < r <= 0.06214545455 }
-            // i = 2; if ( 0.00 < % <= 0.556 ) { 0.06214545455 < r <= 0.06354545455 }
-            // i = 3; if ( 0.556 < % <= 14.44 ) { 0.06354545455 < r <= 0.09854545455 }
-            // i = 4; if ( 14.44 < % <= 15.00 ) { 0.09854545455 < r <= 0.1 }
+        for (uint256 i = 1; i < rewardsTable.length - 1; i++) {
+            // i = 1; if ( -9.63 <= % < 0.00 ) { r = 0.02574545455 }
+            // i = 2; if ( 0.00 <= % < 0.556 ) { r = 0.06214545455 }
+            // i = 3; if ( 0.556 <= % < 14.44 ) { r = 0.06354545455 }
+            // i = 4; if ( 14.44 <= % < 15.00 ) { r = 0.09854545455 }
             if (
-                _currentPercentageChange > rewardsTable[i].percentageChange &&
-                _currentPercentageChange <= rewardsTable[i + 1].percentageChange
-            )
-                return
-                    _rewardsPerSecond =
-                        calculateCoordinateY(
-                            _currentPercentageChange, // x
-                            rewardsTable[i].percentageChange, // minX,
-                            rewardsTable[i + 1].percentageChange, // maxX,
-                            rewardsTable[i].reward, // minY,
-                            rewardsTable[i + 1].reward // maxY
-                        ) /
-                        86400;
+                rewardsTable[i].percentageChange <= lastPercentageChange &&
+                lastPercentageChange < rewardsTable[i + 1].percentageChange
+            ) return _rewardsPerSecond = rewardsTable[i].reward / 86400;
         }
-    }
-
-    /**
-     * Send RewardsPerSecond to Brain Management Contract.
-     */
-    function sendRewardsPerSecond(int256 rewardsPerSecond) internal {
-        brainManagementContract.setRewardsPerSecond(uint256(rewardsPerSecond));
-    }
-
-    /**
-     * Update percentageChange to be used in the next 24h.
-     */
-    function updatePriceChangePercentage(
-        int256 _percentageChange,
-        uint256 _timestamp
-    ) internal {
-        lastPercentageChange = _percentageChange;
-        lastUpdatedTimeStamp = _timestamp;
     }
 
     /**
      * Receive the response in the form of int256
      * We are going to use this function, which is called by a ChainLink node,
-     * to trigger Calculate Rewards and Send Rewards.
+     * to update lastPercentageChange.
      */
     function fulfill(bytes32 _requestId, int256 _priceChangePercentage)
         public
         recordChainlinkFulfillment(_requestId)
     {
-        // Calculate current percentage change
-        int256 _currentPercentageChange = calculateCurrentPercentageChange(
-            _priceChangePercentage,
-            lastPercentageChange
-        );
-        // Calculate current rewardsPerSecond
-        int256 _rewardsPerSecond = calculateRewardsPerSecond(
-            _currentPercentageChange
-        );
-        // Send Rewards to Brain Management Contract
-        sendRewardsPerSecond(_rewardsPerSecond);
-        // Update percentage change to be used in the next 24h
-        updatePriceChangePercentage(_currentPercentageChange, block.timestamp);
-        wasResquested = false;
+        requestedButNotUpdated = false;
+        lastPercentageChange = lastPercentageChange + _priceChangePercentage;
+        updatedButNotSended = true;
     }
 
     /**
      * Create a Chainlink request to retrieve API response, find the target
      * data, then multiply by 10 ** 18 (to remove decimal places from data).
      */
-    function requestUpdateDailyRewards() public returns (bytes32 requestId) {
+    function requestPriceChangePercentage() public returns (bytes32 requestId) {
         Chainlink.Request memory req = buildChainlinkRequest(
             jobId,
             address(this),
@@ -263,54 +206,39 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
         int256 timesAmount = 10**18;
         req.addInt("times", timesAmount);
 
-        wasResquested = true;
+        requestedButNotUpdated = true;
         // Sends the request
         return sendChainlinkRequest(req, fee);
     }
 
     /**
-     * Chainlink automation allow the protocol to run on autopilot without
-     * human intervention to adjust daily rewards.
-     * We call this function once, and after just garantee that the last
-     * upkeep is alaways funded.
+     * performUpkeep function will be executed on-chain when checkUpkeep returns true
      */
-    function initiateAutomaticRewardSystem() public {
-        (State memory state, Config memory _c, address[] memory _k) = registry
-            .getState();
-        uint256 oldNonce = state.nonce;
-        bytes memory checkData;
-        bytes memory payload = abi.encode(
-            "Automatic Reward System",
-            "0x",
-            address(this),
-            gasLimit,
-            address(msg.sender),
-            checkData,
-            automateLinkAmount,
-            0,
-            address(this)
+    function performUpkeep(bytes calldata performData) external {
+        // If checkData is equal to "Update ..."
+        // Check if it's been 24 hours since the last update,
+        // has not been requested yet
+        // and it has not been 'updated but not sent'
+        // If yes requestUpdate to true
+        //      at FulFill Update but Not Send to true and requestUpdate to false
+        if (
+            keccak256(performData) ==
+            keccak256(bytes("Update Rewards Per Second"))
+        ) {
+            requestPriceChangePercentage();
+        }
+        // If checkData is equal to "Send ... + sendPerfomData(rewardsPerSecond)"
+        // Check if it was updated but not sent
+        // If yes send rewardsPerSecond
+        (bytes memory sendCheckData, uint256 rewardsPerSecond) = abi.decode(
+            performData,
+            (bytes, uint256)
         );
-
-        link.transferAndCall(
-            registrar,
-            automateLinkAmount,
-            bytes.concat(registerSig, payload)
-        );
-        (state, _c, _k) = registry.getState();
-        uint256 newNonce = state.nonce;
-        if (newNonce == oldNonce + 1) {
-            uint256 upkeepID = uint256(
-                keccak256(
-                    abi.encodePacked(
-                        blockhash(block.number - 1),
-                        address(registry),
-                        uint32(oldNonce)
-                    )
-                )
-            );
-            lastUpKeepId = upkeepID;
-        } else {
-            revert("auto-approve disabled");
+        if (
+            keccak256(sendCheckData) ==
+            keccak256(bytes("Send Rewards Per Second"))
+        ) {
+            brainManagementContract.setRewardsPerSecond(rewardsPerSecond);
         }
     }
 
@@ -322,59 +250,105 @@ contract UpdateDailyRewards is ChainlinkClient, ConfirmedOwner {
      * if the updateInterval time has passed since the last increment (timestamp).
      * This cycle repeats until the upkeep is cancelled or runs out of funding.
      */
-    function checkUpkeep(
-        bytes calldata /* checkData */
-    )
+    function checkUpkeep(bytes calldata checkData)
         external
         view
-        returns (
-            bool upkeepNeeded,
-            bytes memory /* performData */
-        )
+        returns (bool upkeepNeeded, bytes memory performData)
     {
-        upkeepNeeded =
-            (block.timestamp - lastUpdatedTimeStamp) > interval &&
-            !wasResquested;
-        // We don't use the checkData in this case.
-        // The checkData is defined when the Upkeep was registered.
-    }
-
-    /**
-     * performUpkeep function will be executed on-chain when checkUpkeep returns true
-     */
-    function performUpkeep(
-        bytes calldata /* performData */
-    ) external {
-        //We highly recommend revalidating the upkeep in the performUpkeep function
+        // If checkData is equal to "Update ..."
+        // Check if it's been 24 hours since the last update,
+        // has not been requested yet
+        // and it has not been 'updated but not sent'
+        // If yes (performUpkeep("Update ...")
         if (
-            (block.timestamp - lastUpdatedTimeStamp) > interval &&
-            !wasResquested
+            keccak256(checkData) ==
+            keccak256(bytes("Update Rewards Per Second"))
         ) {
-            requestUpdateDailyRewards();
+            upkeepNeeded =
+                (block.timestamp - lastUpdateTimeStamp) > updateInterval &&
+                !requestedButNotUpdated &&
+                !updatedButNotSended;
+            performData = checkData;
         }
-        // We don't use the performData in this case.
-        // The performData is generated by the Automation Node's call to your checkUpkeep function
+
+        // If checkData is equal to "Send ..."
+        // Check if it was updated but not sent
+        // rewardsPerSecond = calculateRewardsPerSecond
+        // If yes performUpkeep("Send ... + sendPerfomData(rewardsPerSecond)")
+
+        if (
+            keccak256(checkData) == keccak256(bytes("Send Rewards Per Second"))
+        ) {
+            upkeepNeeded = updatedButNotSended;
+            performData = abi.encode(
+                checkData,
+                calculateCurrentRewardsPerSecond()
+            );
+        }
     }
 
     /**
-     * Check contract's Link token balance
+     * You will need to keep track of the Upkeep ID as your contract will use
+     * this to subsequently interact with the Chainlink Automation registry.
      */
-    function contractLinkBalance()
+    function registerAndPredictID(string memory name)
         public
-        view
-        onlyOwner
-        returns (uint256 balance)
+        returns (uint256 upkeepID)
     {
-        balance = link.balanceOf(address(this));
+        (State memory state, Config memory _c, address[] memory _k) = i_registry
+            .getState();
+        uint256 oldNonce = state.nonce;
+        bytes memory checkData = abi.encode(name);
+        bytes memory payload = abi.encode(
+            name,
+            "0x",
+            address(this),
+            5 * 10**8,
+            address(msg.sender),
+            checkData,
+            5 * 10**18,
+            0,
+            address(this)
+        );
+
+        i_link.transferAndCall(
+            registrar,
+            5 * 10**18,
+            bytes.concat(registerSig, payload)
+        );
+        (state, _c, _k) = i_registry.getState();
+        uint256 newNonce = state.nonce;
+        if (newNonce == oldNonce + 1) {
+            upkeepID = uint256(
+                keccak256(
+                    abi.encodePacked(
+                        blockhash(block.number - 1),
+                        address(i_registry),
+                        uint32(oldNonce)
+                    )
+                )
+            );
+        } else {
+            revert("auto-approve disabled");
+        }
     }
 
     /**
-     * Allow withdraw of Link tokens from the contract
+     * Chainlink automation allow the protocol to run on autopilot without
+     * human intervention to adjust daily rewards.
+     * We call this function once, and after just garantee that the last
+     * upkeep is alaways funded.
      */
-    function withdrawLink() public onlyOwner {
-        require(
-            link.transfer(msg.sender, link.balanceOf(address(this))),
-            "Unable to transfer"
-        );
+    function initiateAutomaticRewardSystem() public {
+        // Ensure that automation has not started.
+        // Let there be only one running.
+        require(!automationRunning, "Automation is already running");
+        // Register Automation responsible for updating Rewards Per Second
+        updateUpkeepID = registerAndPredictID("Update Rewards Per Second");
+        // Register Automation responsible for sending Rewards Per Second to Brain Manager
+        sendUpkeepID = registerAndPredictID("Send Rewards Per Second");
+        // Set Automation running to true
+        automationRunning = true;
+        emit AutomationRunning(updateUpkeepID, sendUpkeepID);
     }
 }
