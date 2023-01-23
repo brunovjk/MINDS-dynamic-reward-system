@@ -2,9 +2,12 @@
 pragma solidity ^0.8.7;
 
 contract BrainManagementContract {
-    uint256 public rewardsPerSecond;
+    uint256 public count;
+
+    mapping(uint256 => uint256) public rewardsPerSecond;
 
     function setRewardsPerSecond(uint256 value) public {
-        rewardsPerSecond = value;
+        rewardsPerSecond[count] = value;
+        count++;
     }
 }
