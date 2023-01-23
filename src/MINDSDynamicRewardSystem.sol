@@ -148,7 +148,7 @@ contract MINDSDynamicRewardSystem is
         amountFirstUpkeep = 5000000000000000000;
         amountSecondUpkeep = 5000000000000000000;
 
-        interval = 24 * 60 * 60;
+        interval = 60;
         lastTimeStamp = block.timestamp;
 
         brainManagementContract = IBrainManagementContract(
@@ -594,6 +594,7 @@ contract MINDSDynamicRewardSystem is
      * human intervention to adjust daily rewards.
      * We call this function once, and after just garantee that the last
      * upkeep is alaways funded.
+     * Set gasLimit sent to 999999 when calling this function.
      */
     function initiateAutomation() public {
         require(!automationRunning, "Automation already running");
