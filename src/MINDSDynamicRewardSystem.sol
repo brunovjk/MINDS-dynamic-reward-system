@@ -166,13 +166,13 @@ contract MINDSDynamicRewardSystem is
         setChainlinkOracle(0x40193c8518BB267228Fc409a613bDbD8eC5a97b3); // mumbai
 
         registrar = (0xDb8e8e2ccb5C033938736aa89Fe4fa1eDfD15a1d); // Mumbai
-        // registrar = (0x9806cf6fBc89aBF286e8140C42174B94836e36F2); // Goleri
+        // registrar = (0x9806cf6fBc89aBF286e8140C42174B94836e36F2); // Goerli
         i_registry = AutomationRegistryInterface(
             0x02777053d6764996e594c3E88AF1D58D5363a2e6
         );
 
         /**
-         * It was decided to upload all the table values ​​when ploying the contract.
+         * It was decided to upload all the table values ​​when deploying the contract.
          * The initial idea was to create a formula to calculate the reward per
          * second, but after some tests it was decided that it would be safer to
          * scan the entire table (Although spending a little more gas) to find the
@@ -418,6 +418,7 @@ contract MINDSDynamicRewardSystem is
         // if ( % < -9.63 ) { r = 0.02}
         if (_performance < rewardsTable[1].percentageChange)
             return _rewardsPerSeconds = rewardsTable[0].reward / 86400;
+
         // And cannot be higher than 0.1 MIND+ per day
         // if ( % >= 15.00 ) { r = 0.1}
         if (
@@ -428,6 +429,7 @@ contract MINDSDynamicRewardSystem is
                 _rewardsPerSeconds =
                     rewardsTable[rewardsTable.length - 1].reward /
                     86400;
+
         // Example, say the rolling percentage is 4.536%. This would equate
         // to index item 36, percent 4.44 (rounded down), and have a reward
         // of 0.07334545455. Divide that number by (60*60*24), multiply that
@@ -576,10 +578,12 @@ contract MINDSDynamicRewardSystem is
         // If checkData is equal to "Send ..."
         // Check if it was fulfllied
         // If yes setRewardsPerSecond
-        if (requestFulFilled) {
-            brainManagementContract.setRewardsPerSecond(rewardsPerSecond);
-            requestFulFilled = false;
-            emit SendRewardsPerSecond(rewardsPerSecond);
+        if (keccak256(performData) == keccak256(bytes(nameSecondUpkeep))) {
+            if (requestFulFilled) {
+                brainManagementContract.setRewardsPerSecond(rewardsPerSecond);
+                requestFulFilled = false;
+                emit SendRewardsPerSecond(rewardsPerSecond);
+            }
         }
     }
 
