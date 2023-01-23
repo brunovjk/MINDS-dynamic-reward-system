@@ -43,18 +43,21 @@ contract MINDSDynamicRewardSystem is
      * Contract interface that we will send new calculated rewardsPerSecond
      */
     IBrainManagementContract private immutable brainManagementContract;
+
     /**
      * Chainlink Registrar and Registry Address
      */
     address public immutable registrar;
     AutomationRegistryInterface public immutable i_registry;
     bytes4 registerSig = KeeperRegistrarInterface.register.selector;
+
     /**
      * Values ​​we are updating automatically
      */
     int256 public performance;
     uint256 public rewardsPerSecond;
     bool public requestFulFilled;
+
     /**
      * Variable type used to calculate reward per percentage
      */
@@ -62,49 +65,56 @@ contract MINDSDynamicRewardSystem is
         int256 percentageChange;
         uint256 reward;
     }
+
     /**
      * Current system table coordinates (spreadsheet table)
      */
     RewardsCoordinates[] public rewardsTable;
+
     /**
      * Interval at which the update will be performed
      */
     uint256 public immutable interval;
     uint256 public lastTimeStamp;
+
     /**
      * Chainlink Any API values
      */
     bytes32 private jobId;
     uint256 private fee;
+
     /**
      * Make sure last Upkeeps have balance
      */
     uint256 public firstUpkeepID;
-    string private nameFirstUpkeep;
-
     uint256 public secondUpkeepID;
+    string private nameFirstUpkeep;
     string private nameSecondUpkeep;
+
     /**
      * This is the maximum amount of gas that your transaction
      * requires to execute on chain.
      */
-
     uint32 internal gasLimitFirstUpkeep;
     uint32 internal gasLimitSecondUpkeep;
+
     /**
      * This field is required. You must have LINK before you
      * can use the Chainlink Automation service.
      * The minimum amount is 5 LINK.
      */
-
     uint96 internal amountFirstUpkeep;
     uint96 internal amountSecondUpkeep;
+
     /**
      * Tracks the state of our machine.
      */
     bool public automationRunning;
     uint256[] public upkeepsToWithdraw;
 
+    /**
+     * Automation events
+     */
     event AutomationRunning(
         uint256 indexed firstUpkeepID,
         uint256 indexed secondUpkeepID
