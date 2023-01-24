@@ -329,7 +329,7 @@ forge install
 We are writing tests, for now we only have tests of the function to calculate rewards per second
 
 ```
-forge test --match-contract CalcRewardsPerSecondTest -vvvv
+forge test --match-contract CalcRewardsPerSecondTest -vvv
 ```
 
 ### Tasks

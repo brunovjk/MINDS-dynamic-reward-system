@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.13;
-
+pragma solidity 0.8.17;
+// Mumbai 0x93569db05cd532B811532f2C707FFD5c404458e2
 import "@chainlink/contracts/src/v0.8/ChainlinkClient.sol";
 import "@chainlink/contracts/src/v0.8/AutomationCompatible.sol";
 import {AutomationRegistryInterface, State, Config} from "./AutomationRegistryInterface.sol";
@@ -148,8 +148,8 @@ contract MINDSDynamicRewardSystem is
         amountFirstUpkeep = 5000000000000000000;
         amountSecondUpkeep = 5000000000000000000;
 
-        interval = 60;
-        lastTimeStamp = block.timestamp;
+        interval = 24 * 60 * 60;
+        lastTimeStamp = block.timestamp - interval;
 
         brainManagementContract = IBrainManagementContract(
             brainManagementContractAddress
@@ -409,15 +409,15 @@ contract MINDSDynamicRewardSystem is
      * Calculate RewardsPerSecond according to current percentage change.
      * Return daily rewards in 'per the second' format: value in Wei / 86400
      */
-    function calculateRewardsPerSeconds(int256 _performance)
+    function calculateRewardsPerSecond(int256 _performance)
         public
         view
-        returns (uint256 _rewardsPerSeconds)
+        returns (uint256 _rewardsPerSecond)
     {
         // The rewards cannot be lower than 0.02 MIND+ per day
         // if ( % < -9.63 ) { r = 0.02}
         if (_performance < rewardsTable[1].percentageChange)
-            return _rewardsPerSeconds = rewardsTable[0].reward / 86400;
+            return _rewardsPerSecond = rewardsTable[0].reward / 86400;
 
         // And cannot be higher than 0.1 MIND+ per day
         // if ( % >= 15.00 ) { r = 0.1}
@@ -426,7 +426,7 @@ contract MINDSDynamicRewardSystem is
             rewardsTable[rewardsTable.length - 1].percentageChange
         )
             return
-                _rewardsPerSeconds =
+                _rewardsPerSecond =
                     rewardsTable[rewardsTable.length - 1].reward /
                     86400;
 
@@ -438,7 +438,7 @@ contract MINDSDynamicRewardSystem is
             if (
                 rewardsTable[i].percentageChange <= _performance &&
                 _performance < rewardsTable[i + 1].percentageChange
-            ) return _rewardsPerSeconds = rewardsTable[i].reward / 86400;
+            ) return _rewardsPerSecond = rewardsTable[i].reward / 86400;
         }
     }
 
@@ -478,7 +478,7 @@ contract MINDSDynamicRewardSystem is
         recordChainlinkFulfillment(_requestId)
     {
         performance = performance + _lastPriceChange;
-        rewardsPerSecond = calculateRewardsPerSeconds(performance);
+        rewardsPerSecond = calculateRewardsPerSecond(performance);
         requestFulFilled = true;
         emit Fulfilled(performance, rewardsPerSecond);
     }
